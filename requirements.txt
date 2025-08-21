@@ -1,0 +1,24 @@
+# Core
+pydantic>=2.0,<3.0
+tiktoken>=0.6.0
+python-dotenv>=1.0.0
+ffmpeg-python>=0.2.0
+soundfile>=0.12.1
+librosa>=0.10.0
+numpy>=1.24.0
+
+# OpenAI API client (LLM + optional Whisper API STT)
+openai>=1.30.0
+
+# Faster-Whisper (local STT option)
+faster-whisper>=1.0.0
+
+# Hugging Face models (Whisper Malayalam, Wav2Vec2, XLM-R)
+transformers>=4.41.0
+torch>=2.2.0
+torchaudio>=2.2.0
+accelerate>=0.30.0
+sentencepiece>=0.1.99
+
+# Optional metrics / utilities
+jiwer>=3.0.0

@@ -1,0 +1,21 @@
+{
+  "name": "opsai-root",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Root package.json for AI Agent (server + web) with one-click start",
+  "main": "start.js",
+  "scripts": {
+    "start:agent": "node start.js"
+  },
+  "devDependencies": {
+    "open": "^10.2.0"
+  },
+  "keywords": [
+    "ai-agent",
+    "meeting-transcription",
+    "react",
+    "express"
+  ],
+  "author": "Kailash Nair",
+  "license": "MIT"
+}
