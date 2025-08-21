@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] },
+
+    "jsx": "react-jsx",
+
+    "allowJs": true,          // let TS index your .js/.jsx files
+    "checkJs": false,         // no JS type errors
+    "noEmit": true,           // <- DO NOT write output files
+    "skipLibCheck": true      // speed up / avoid lib type errors
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
