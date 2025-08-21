@@ -99,43 +99,107 @@ export default function UploadPage() {
 
   setIsUploading(true);
   setUploadError(null);
+  setUploadSuccess(false);
 
   try {
-    // 1) Upload the file
-    const resp = await UploadFile({ file: selectedFile });
-    // Be tolerant of different key names just in case
-    const fileUrl  = resp.file_url  ?? resp.fileUrl  ?? resp.url;
-    const filePath = resp.file_path ?? resp.filePath ?? resp.path ?? "";
+    // ---- Step 1: Upload the file (service -> fallback) ----------------------
+    let resp;
+    let uploadOk = false;
 
-    if (!fileUrl) {
-      throw new Error("Upload response missing file_url");
+    try {
+      resp = await UploadFile({ file: selectedFile });
+      console.log("[UploadFile] raw response:", resp);
+      uploadOk = true;
+    } catch (e) {
+      console.warn("[UploadFile] failed, will try direct POST /api/upload:", e);
     }
 
-    // (Optional) Inspect what came back
-    // console.log("Upload response:", resp);
+    let fileUrl, filePath;
+    if (uploadOk) {
+      // Be tolerant of key names and also catch empty strings
+      fileUrl =
+        resp?.file_url ||
+        resp?.fileUrl ||
+        resp?.url ||
+        "";
+      filePath =
+        resp?.file_path ||
+        resp?.filePath ||
+        resp?.path ||
+        "";
+    }
 
-    // 2) Create the meeting record
-    await Meeting.create({
+    // Fallback: direct multipart to backend if UploadFile failed or missing URL
+    if (!fileUrl) {
+      const base = import.meta?.env?.VITE_API_URL?.replace(/\/+$/, "") || "http://localhost:5001";
+      const form = new FormData();
+      form.append("file", selectedFile);
+
+      const upRes = await fetch(`${base}/api/upload`, {
+        method: "POST",
+        body: form,
+      });
+
+      if (!upRes.ok) {
+        const text = await upRes.text().catch(() => "");
+        throw new Error(text || `Upload failed with status ${upRes.status}`);
+      }
+
+      // Expect backend to return JSON: { ok: true, url, path, ... } or meeting meta
+      const upJson = await upRes.json().catch(() => ({}));
+      console.log("[direct /api/upload] response:", upJson);
+
+      // Tolerant key extraction
+      fileUrl = upJson.file_url || upJson.fileUrl || upJson.url || "";
+      filePath = upJson.file_path || upJson.filePath || upJson.path || "";
+
+      // Some backends only create a meeting and return id; if so, skip Meeting.create below
+      if (!fileUrl && upJson?.meeting?.id) {
+        // Already created by server; just navigate
+        setUploadSuccess(true);
+        setTimeout(() => navigate(createPageUrl("Dashboard")), 1000);
+        return;
+      }
+
+      if (!fileUrl) {
+        throw new Error("Upload succeeded but no file URL was returned.");
+      }
+    }
+
+    // ---- Step 2: Create the meeting record ---------------------------------
+    // If your backend expects specific field names, make sure they match here.
+    const meetingPayload = {
       title: meetingTitle,
       original_file_url: fileUrl,
-      original_file_path: filePath,        // <— SAFE even if empty (mock mode)
+      original_file_path: filePath || null,
       file_name: selectedFile.name,
       file_size: selectedFile.size,
       processing_method: processingMethod,
       status: "uploaded",
-    });
+    };
+
+    console.log("[Meeting.create] payload:", meetingPayload);
+
+    const created = await Meeting.create(meetingPayload);
+    console.log("[Meeting.create] response:", created);
+
+    // Optional: verify created.meeting or success flag if your SDK returns one
+    if (created?.error || created?.ok === false) {
+      throw new Error(created?.message || created?.error || "Meeting.create failed");
+    }
 
     setUploadSuccess(true);
     setTimeout(() => {
       navigate(createPageUrl("Dashboard"));
-    }, 1200);
+    }, 1000);
   } catch (error) {
-    console.error("Upload error:", error);
+    console.error("Upload flow error:", error);
     setUploadError(error?.message || "Failed to upload meeting. Please try again.");
   } finally {
     setIsUploading(false);
   }
 };
+
 
   const formatFileSize = (bytes) => {
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
