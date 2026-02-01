@@ -8,7 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Upload, FileVideo, FileAudio, Zap, AlertCircle, CheckCircle } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Upload, FileVideo, FileAudio, Zap, AlertCircle, CheckCircle, Shield, Settings } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 
@@ -22,19 +23,19 @@ const PROCESSING_METHODS = [
   {
     value: "faster_whisper",
     label: "Faster-Whisper (Local)",
-    description: "Fast processing, works offline",
+    description: "Fast local processing with enhanced beam search",
     icon: "⚡"
   },
   {
     value: "hf_whisper_malayalam",
     label: "HF Whisper-Medium Malayalam (Local)",
-    description: "Fine-tuned for Malayalam, then LLM translation",
+    description: "Fine-tuned for Malayalam with improved translation prompts",
     icon: "🎯"
   },
   {
     value: "hf_wav2vec2",
     label: "HF Wav2Vec2 Malayalam (Local)",
-    description: "Local CTC model with LLM translation",
+    description: "Local CTC model with enhanced LLM translation",
     icon: "🔧"
   }
 ];
@@ -46,6 +47,8 @@ export default function UploadPage() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [meetingTitle, setMeetingTitle] = useState("");
   const [processingMethod, setProcessingMethod] = useState("");
+  const [validateSummary, setValidateSummary] = useState(true); // Enable validation by default
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState(null);
   const [uploadSuccess, setUploadSuccess] = useState(false);
@@ -175,6 +178,7 @@ export default function UploadPage() {
       file_name: selectedFile.name,
       file_size: selectedFile.size,
       processing_method: processingMethod,
+      validate_summary: validateSummary,
       status: "uploaded",
     };
 
@@ -342,8 +346,8 @@ export default function UploadPage() {
                   </SelectTrigger>
                   <SelectContent className="glass-panel border-white/30 bg-gray-900/80 backdrop-blur-xl">
                     {PROCESSING_METHODS.map((method) => (
-                      <SelectItem 
-                        key={method.value} 
+                      <SelectItem
+                        key={method.value}
                         value={method.value}
                         className="text-white hover:bg-white/10"
                       >
@@ -359,6 +363,50 @@ export default function UploadPage() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* Advanced Options Toggle */}
+              <div className="pt-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setShowAdvanced(!showAdvanced)}
+                  className="text-white/70 hover:text-white hover:bg-white/10 p-0 h-auto"
+                >
+                  <Settings className="w-4 h-4 mr-2" />
+                  {showAdvanced ? "Hide" : "Show"} Advanced Options
+                </Button>
+              </div>
+
+              {/* Advanced Options */}
+              {showAdvanced && (
+                <div className="space-y-4 pt-2 border-t border-white/10">
+                  <div className="flex items-center justify-between p-4 glass-panel rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <Shield className="w-5 h-5 text-green-400" />
+                      <div>
+                        <Label className="text-white font-medium">Summary Validation</Label>
+                        <p className="text-sm text-white/60 mt-1">
+                          Cross-check extracted summary against transcript for accuracy
+                        </p>
+                      </div>
+                    </div>
+                    <Switch
+                      checked={validateSummary}
+                      onCheckedChange={setValidateSummary}
+                      className="data-[state=checked]:bg-green-500"
+                    />
+                  </div>
+                  {validateSummary && (
+                    <div className="text-sm text-white/50 pl-4 flex items-start gap-2">
+                      <CheckCircle className="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0" />
+                      <span>
+                        Validation enabled: The system will verify action items, decisions, and
+                        numerical data against the original transcript to prevent hallucinations.
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
 

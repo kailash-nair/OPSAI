@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FileText, Eye, Download, RefreshCw, Calendar, User, Copy, Check } from "lucide-react";
+import { FileText, Eye, Download, RefreshCw, Calendar, User, Copy, Check, Shield, ShieldOff } from "lucide-react";
 // import { format } from "date-fns"; // REMOVED
 import {
   Dialog,
@@ -186,9 +186,16 @@ export default function RecentMeetings({ meetings, onRefresh }) {
                     </div>
 
                     <div className="flex items-center justify-between">
-                      <Badge variant="outline" className="border-white/30 text-white/70 text-xs">
-                        {METHOD_LABELS[meeting.processing_method]}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        {meeting.validate_summary ? (
+                          <Shield className="w-4 h-4 text-green-400" title="Validation enabled" />
+                        ) : (
+                          <ShieldOff className="w-4 h-4 text-white/40" title="Validation disabled" />
+                        )}
+                        <Badge variant="outline" className="border-white/30 text-white/70 text-xs">
+                          {METHOD_LABELS[meeting.processing_method]}
+                        </Badge>
+                      </div>
 
                       <div className="flex gap-2">
                         {/* Open original file if present */}
@@ -251,7 +258,7 @@ export default function RecentMeetings({ meetings, onRefresh }) {
 
           {active ? (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
                 <div>
                   <p className="text-white/60">Status</p>
                   <Badge className={`${STATUS_CONFIG[active.status]?.bg} ${STATUS_CONFIG[active.status]?.color} mt-1`}>
@@ -269,6 +276,22 @@ export default function RecentMeetings({ meetings, onRefresh }) {
                 <div>
                   <p className="text-white/60">Method</p>
                   <p className="text-white font-medium">{METHOD_LABELS[active.processing_method]}</p>
+                </div>
+                <div>
+                  <p className="text-white/60">Validation</p>
+                  <div className="flex items-center gap-1 mt-1">
+                    {active.validate_summary ? (
+                      <>
+                        <Shield className="w-4 h-4 text-green-400" />
+                        <span className="text-green-400 font-medium">Enabled</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShieldOff className="w-4 h-4 text-white/40" />
+                        <span className="text-white/40 font-medium">Disabled</span>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
 

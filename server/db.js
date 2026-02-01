@@ -15,6 +15,7 @@ db.exec(`
     file_name TEXT NOT NULL,
     file_size INTEGER NOT NULL DEFAULT 0,
     processing_method TEXT NOT NULL,
+    validate_summary INTEGER NOT NULL DEFAULT 1,
     status TEXT NOT NULL DEFAULT 'uploaded',
     progress INTEGER NOT NULL DEFAULT 0,
     created_date TEXT NOT NULL,
@@ -22,5 +23,12 @@ db.exec(`
     markdown_output TEXT NOT NULL DEFAULT ''
   );
 `);
+
+// Migration: add validate_summary column if it doesn't exist (for existing databases)
+try {
+  db.exec(`ALTER TABLE meetings ADD COLUMN validate_summary INTEGER NOT NULL DEFAULT 1;`);
+} catch (e) {
+  // Column already exists, ignore error
+}
 
 module.exports = db;
