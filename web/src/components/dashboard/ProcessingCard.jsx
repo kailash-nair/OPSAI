@@ -2,7 +2,7 @@ import React from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { Clock, FileVideo } from "lucide-react";
+import { Clock, FileVideo, Shield, ShieldOff } from "lucide-react";
 import { format } from "date-fns";
 
 const METHOD_LABELS = {
@@ -49,9 +49,16 @@ export default function ProcessingCard({ meeting }) {
               <Clock className="w-4 h-4" />
               {format(new Date(meeting.created_date), "MMM d, h:mm a")}
             </div>
-            <Badge variant="outline" className="border-white/30 text-white/80 text-xs">
-              {METHOD_LABELS[meeting.processing_method]}
-            </Badge>
+            <div className="flex items-center gap-2">
+              {meeting.validate_summary ? (
+                <Shield className="w-4 h-4 text-green-400" title="Validation enabled" />
+              ) : (
+                <ShieldOff className="w-4 h-4 text-white/40" title="Validation disabled" />
+              )}
+              <Badge variant="outline" className="border-white/30 text-white/80 text-xs">
+                {METHOD_LABELS[meeting.processing_method]}
+              </Badge>
+            </div>
           </div>
         </div>
       </CardContent>

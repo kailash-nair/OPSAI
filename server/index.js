@@ -47,10 +47,10 @@ const upload = multer({ storage });
 const insertStmt = db.prepare(`
   INSERT INTO meetings (
     id, title, original_file_url, original_file_path, file_name, file_size,
-    processing_method, status, progress, created_date, created_by, markdown_output
+    processing_method, validate_summary, status, progress, created_date, created_by, markdown_output
   ) VALUES (
     @id, @title, @original_file_url, @original_file_path, @file_name, @file_size,
-    @processing_method, @status, @progress, @created_date, @created_by, @markdown_output
+    @processing_method, @validate_summary, @status, @progress, @created_date, @created_by, @markdown_output
   )
 `);
 const listDescStmt = db.prepare(`SELECT * FROM meetings ORDER BY datetime(created_date) DESC LIMIT ?`);
@@ -72,6 +72,7 @@ function newMeeting(body) {
     file_name: body.file_name || "",
     file_size: Number(body.file_size || 0),
     processing_method: body.processing_method || "openai_whisper",
+    validate_summary: body.validate_summary !== false ? 1 : 0, // Default to enabled
     status: "processing",
     progress: 0,
     created_date: now,
@@ -211,6 +212,9 @@ async function startAgentPython(id) {
     supportsDual = py.includes("--out-summary") && py.includes("--out-transcript");
   } catch {}
 
+  // Determine validation flag
+  const validateFlag = row.validate_summary ? "--validate" : "--no-validate";
+
   const args = supportsDual
     ? [
         AGENT_MAIN,
@@ -218,7 +222,8 @@ async function startAgentPython(id) {
         "--date", date,
         "--attendees", attendees,
         "--out-summary", outSummary,
-        "--out-transcript", outTranscript
+        "--out-transcript", outTranscript,
+        validateFlag
       ]
     : [
         AGENT_MAIN,

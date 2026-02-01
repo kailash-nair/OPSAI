@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FileText, Download, Eye, Calendar, User, Clock, Copy, Check } from "lucide-react";
+import { FileText, Download, Eye, Calendar, User, Clock, Copy, Check, Shield, ShieldOff } from "lucide-react";
 import { format } from "date-fns";
 import {
   Dialog,
@@ -100,10 +100,17 @@ export default function MeetingCard({ meeting }) {
             </div>
           </div>
 
-          {/* Processing Method */}
-          <Badge variant="outline" className="border-white/30 text-white/80 text-xs">
-            {METHOD_LABELS[meeting.processing_method]}
-          </Badge>
+          {/* Processing Method & Validation Status */}
+          <div className="flex items-center gap-2">
+            {meeting.validate_summary ? (
+              <Shield className="w-4 h-4 text-green-400" title="Validation enabled" />
+            ) : (
+              <ShieldOff className="w-4 h-4 text-white/40" title="Validation disabled" />
+            )}
+            <Badge variant="outline" className="border-white/30 text-white/80 text-xs">
+              {METHOD_LABELS[meeting.processing_method]}
+            </Badge>
+          </div>
 
           {/* Action Buttons */}
           <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
@@ -147,10 +154,10 @@ export default function MeetingCard({ meeting }) {
           
           <div className="space-y-6">
             {/* Meeting Details */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
               <div>
                 <p className="text-white/60">Status</p>
-                <Badge 
+                <Badge
                   className={`${STATUS_CONFIG[meeting.status]?.bg} ${STATUS_CONFIG[meeting.status]?.color} mt-1`}
                 >
                   {meeting.status}
@@ -167,6 +174,22 @@ export default function MeetingCard({ meeting }) {
               <div>
                 <p className="text-white/60">Method</p>
                 <p className="text-white font-medium">{METHOD_LABELS[meeting.processing_method]}</p>
+              </div>
+              <div>
+                <p className="text-white/60">Validation</p>
+                <div className="flex items-center gap-1 mt-1">
+                  {meeting.validate_summary ? (
+                    <>
+                      <Shield className="w-4 h-4 text-green-400" />
+                      <span className="text-green-400 font-medium">Enabled</span>
+                    </>
+                  ) : (
+                    <>
+                      <ShieldOff className="w-4 h-4 text-white/40" />
+                      <span className="text-white/40 font-medium">Disabled</span>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
 
