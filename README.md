@@ -49,31 +49,7 @@ pip install -r requirements.txt
 
 ### Configuration
 
-Create environment files for the server and web app:
-
-**`server/.env`**
-```env
-PORT=5001
-WEB_ORIGIN=http://localhost:5173
-AGENT_MODE=python
-PYTHON_EXE=python
-AGENT_MAIN=../main.py
-AGENT_ATTENDEES=Rahul; Meera; Akash
-
-# OpenAI Configuration
-OPENAI_API_KEY=sk-your-api-key-here
-OPENAI_BASE_URL=https://api.openai.com/v1
-LLM_MODEL=gpt-4o-mini
-
-# Speech-to-Text Backend (choose one)
-STT_BACKEND=openai
-# Options: openai | faster_whisper | hf_whisper_ml | hf_wav2vec2_ml
-```
-
-**`web/.env`**
-```env
-VITE_API_BASE=http://localhost:5001
-```
+Copy `.env.example` to `.env` in both `server/` and `web/` directories, then add your OpenAI API key.
 
 ### Run the Application
 
