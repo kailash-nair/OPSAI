@@ -29,12 +29,29 @@ Usage
 # 2) Environment
 #    OPENAI_API_KEY=sk-...            (required for LLM and for Whisper API mode)
 #    OPENAI_BASE_URL=https://api.openai.com/v1   (optional; set if using a proxy)
-#    LLM_MODEL=gpt-4o-mini            (or gpt-4o, etc.)
+#
+#    # LLM Models (use different models for different tasks for optimal accuracy/cost)
+#    LLM_MODEL=gpt-4o-mini            (default model for general tasks)
+#    LLM_MODEL_TRANSLATE=gpt-4o-mini  (model for Malayalam->English translation)
+#    LLM_MODEL_TRANSFORM=gpt-4o-mini  (model for register transformation)
+#    LLM_MODEL_SUMMARIZE=gpt-4o       (model for issue summarization - recommend gpt-4o)
+#    LLM_MODEL_VALIDATE=gpt-4o        (model for summary validation - recommend gpt-4o)
+#
+#    # Speech-to-Text Configuration
 #    STT_BACKEND=openai|faster_whisper|hf_whisper_ml|hf_wav2vec2_ml
+#    WHISPER_MODEL=whisper-1          (for OpenAI Whisper API)
 #    FW_MODEL=large-v3                (for faster-whisper; or medium/small)
+#    FW_COMPUTE_TYPE=float16          (use float16 for better accuracy, int8 for speed)
+#    WHISPER_CHUNK_SECONDS=60         (chunk size for HF Whisper - higher = better context)
+#    W2V2_CHUNK_SECONDS=60            (chunk size for Wav2Vec2 - higher = better context)
+#
+#    # HuggingFace Models
 #    HF_WHISPER_ML_MODEL=vrclc/Whisper-medium-Malayalam
 #    HF_W2V2_ML_MODEL=gvs/wav2vec2-large-xlsr-malayalam
 #    HF_MLXLMR_MODEL=bytesizedllm/MalayalamXLM_Roberta
+#
+#    # Validation
+#    VALIDATE_SUMMARY=true            (enable/disable summary validation step)
 #
 # 3) Run (new dual-output):
 #   python main.py \
@@ -75,6 +92,17 @@ DEPARTMENTS = [
     "Installation", "Production", "Design", "Estimation",
     "Quality", "Logistics", "Stores"
 ]
+
+# Enhanced department descriptions for better semantic matching
+DEPARTMENT_DESCRIPTIONS = {
+    "Installation": "site installation, field work, mounting, wiring, commissioning, on-site teams, site engineers, installation crew, field deployment, site handover",
+    "Production": "manufacturing, assembly, fabrication, factory floor, production schedule, production line, machine operators, production targets, shop floor, batch production",
+    "Design": "engineering design, CAD, drawings, specifications, technical design, blueprints, design review, R&D, product design, schematic, 3D modeling",
+    "Estimation": "cost estimation, quotations, pricing, BOQ, bill of quantities, material calculations, project costing, tender, budget, price analysis",
+    "Quality": "quality control, QC, QA, testing, inspection, defects, compliance, quality assurance, audit, certification, standards, rejection, rework",
+    "Logistics": "shipping, transport, delivery, dispatch, fleet, warehousing, freight, courier, transportation, vehicle, route planning, consignment",
+    "Stores": "inventory, stock, materials, warehouse, procurement, spare parts, stock level, material receipt, issue slip, bin card, reorder, stock audit"
+}
 
 
 class ActionItem(BaseModel):
@@ -239,8 +267,12 @@ class Transcriber(Tool):
             language="ml",
             task="translate",
             vad_filter=True,
-            beam_size=5,
-            condition_on_previous_text=False,
+            beam_size=10,                       # Increased from 5 for better accuracy
+            best_of=5,                          # Sample multiple candidates
+            patience=2.0,                       # Beam search patience for better results
+            condition_on_previous_text=True,    # Use context from previous segments
+            no_speech_threshold=0.6,            # Filter silence more effectively
+            compression_ratio_threshold=2.4,    # Filter potentially bad segments
         )
         return " ".join([seg.text.strip() for seg in segments if seg.text])
 
@@ -262,7 +294,7 @@ class Transcriber(Tool):
         model.config.forced_decoder_ids = processor.get_decoder_prompt_ids(language="ml", task="transcribe")
 
         target_sr = 16000
-        chunk_seconds = int(os.getenv("WHISPER_CHUNK_SECONDS", "30"))  # lower if OOM persists
+        chunk_seconds = int(os.getenv("WHISPER_CHUNK_SECONDS", "60"))  # Increased to 60 for better context; lower if OOM
         chunk_size = chunk_seconds * target_sr
 
         out_en = []
@@ -294,12 +326,22 @@ class Transcriber(Tool):
                     ml_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
 
                 if ml_text:
-                    # translate chunk
-                    translation_prompt = (
-                        "Translate the following Malayalam meeting transcript chunk into clear, idiomatic English:\n\n"
-                        + ml_text
-                    )
-                    en_chunk = llm_complete(translation_prompt, model=os.getenv("LLM_MODEL", "gpt-4o-mini"))
+                    # translate chunk with enhanced prompt
+                    translation_prompt = f"""Translate the following Malayalam meeting transcript to clear, professional English.
+
+RULES:
+- Preserve ALL technical terms, numbers, dates, and proper names exactly as spoken
+- Keep the complete meaning intact - do NOT summarize or omit any information
+- Use professional business English appropriate for corporate meetings
+- Handle code-switching (Malayalam-English mix) naturally
+- If a word is unclear or untranslatable, transliterate it in parentheses
+- Maintain speaker intent and tone
+
+Malayalam text:
+{ml_text}
+
+English translation:"""
+                    en_chunk = llm_complete(translation_prompt, model=os.getenv("LLM_MODEL_TRANSLATE", os.getenv("LLM_MODEL", "gpt-4o-mini")))
                     out_en.append(en_chunk)
 
                 # free memory
@@ -329,7 +371,7 @@ class Transcriber(Tool):
 
         # --- chunking params ---
         target_sr = 16000
-        chunk_seconds = int(os.getenv("W2V2_CHUNK_SECONDS", "30"))  # reduce to 10-20 if still OOM
+        chunk_seconds = int(os.getenv("W2V2_CHUNK_SECONDS", "60"))  # Increased to 60 for better context; reduce to 10-20 if OOM
         hop_seconds = chunk_seconds  # non-overlapping; you can overlap slightly if you like
         chunk_size = chunk_seconds * target_sr
         hop_size = hop_seconds * target_sr
@@ -367,13 +409,23 @@ class Transcriber(Tool):
                     predicted_ids = torch.argmax(logits, dim=-1)
                     ml_text = processor.batch_decode(predicted_ids)[0].strip()
 
-                # translate Malayalam -> English via LLM
+                # translate Malayalam -> English via LLM with enhanced prompt
                 if ml_text:
-                    translation_prompt = (
-                        "Translate the following Malayalam meeting transcript chunk into clear, idiomatic English:\n\n"
-                        + ml_text
-                    )
-                    en_chunk = llm_complete(translation_prompt, model=os.getenv("LLM_MODEL", "gpt-4o-mini"))
+                    translation_prompt = f"""Translate the following Malayalam meeting transcript to clear, professional English.
+
+RULES:
+- Preserve ALL technical terms, numbers, dates, and proper names exactly as spoken
+- Keep the complete meaning intact - do NOT summarize or omit any information
+- Use professional business English appropriate for corporate meetings
+- Handle code-switching (Malayalam-English mix) naturally
+- If a word is unclear or untranslatable, transliterate it in parentheses
+- Maintain speaker intent and tone
+
+Malayalam text:
+{ml_text}
+
+English translation:"""
+                    en_chunk = llm_complete(translation_prompt, model=os.getenv("LLM_MODEL_TRANSLATE", os.getenv("LLM_MODEL", "gpt-4o-mini")))
                     out_text.append(en_chunk)
 
                 # free memory incrementally
@@ -397,36 +449,51 @@ class RegisterTransformer(Tool):
     name = "register_transformer"
     description = "Cleans disfluencies and rewrites transcript into polished business English."
 
-    def __init__(self, model_env_var: str = "LLM_MODEL"):
-        self.model_name = os.getenv(model_env_var, "gpt-4o-mini")
+    def __init__(self, model_env_var: str = "LLM_MODEL_TRANSFORM"):
+        self.model_name = os.getenv(model_env_var, os.getenv("LLM_MODEL", "gpt-4o-mini"))
 
     def run(self, raw_english_transcript: str) -> str:
-        prompt = f"""
-You are a corporate communications editor. Rewrite the following meeting transcript
-into concise, polished business English suitable for an executive audience. Follow
-these rules:
-- Remove filler words and false starts.
-- Standardize corporate terminology (e.g., "deployment" instead of "setting up").
-- Fix grammar and punctuation.
-- Preserve meaning; do not omit key details.
-- Keep speaker labels out; we only need content.
+        dept_list = ', '.join(DEPARTMENTS)
+        prompt = f"""You are a corporate communications editor specializing in operations meetings.
+Rewrite the following meeting transcript into concise, polished business English
+suitable for an executive audience.
+
+RULES:
+1. Remove filler words, false starts, repetitions, and verbal tics
+2. Standardize terminology:
+   - "deployment" instead of "setting up"
+   - "procurement" instead of "buying"
+   - "timeline" instead of "how long it takes"
+   - "stakeholders" instead of "people involved"
+3. Fix grammar, punctuation, and sentence structure
+4. Preserve ALL technical details, numbers, dates, and names EXACTLY
+5. Maintain the logical flow and sequence of discussions
+6. When speakers reference items implicitly ("that thing", "the issue"),
+   infer and make explicit what they're referring to based on context
+7. Preserve department-specific terminology for: {dept_list}
+8. Keep speaker labels out; we only need content
+
+IMPORTANT: Do NOT omit any substantive information. Accuracy is more important than brevity.
+Every technical detail, number, date, and decision must be preserved.
 
 Transcript:
 \"\"\"
 {raw_english_transcript}
-\"\"\""""
+\"\"\"
+
+Polished transcript:"""
         return llm_complete(prompt, model=self.model_name)
 
 
 class DeptCueTagger(Tool):
     name = "dept_cue_tagger"
-    description = "Scores sentences against Ops departments using Malayalam-XLM-R embeddings."
+    description = "Scores sentences against Ops departments using Malayalam-XLM-R embeddings with enhanced descriptions."
 
     def __init__(self):
         self.model_id = os.getenv("HF_MLXLMR_MODEL", "bytesizedllm/MalayalamXLM_Roberta")
 
     def run(self, transcript_english: str) -> Dict[str, Any]:
-        # Simple cosine-similarity scoring on CLS embeddings to hint owners
+        # Enhanced cosine-similarity scoring using department descriptions
         from transformers import AutoTokenizer, AutoModel
         import torch
         import torch.nn.functional as F
@@ -440,12 +507,17 @@ class DeptCueTagger(Tool):
                 out = mdl(**tok(texts, padding=True, truncation=True, return_tensors="pt"))
                 return out.last_hidden_state[:, 0]  # CLS
 
-        # crude sentence split
-        sents = [s.strip() for s in transcript_english.replace("\n", " ").split(".") if s.strip()]
+        # Improved sentence splitting - handle multiple delimiters
+        import re
+        sents = [s.strip() for s in re.split(r'[.!?]\s+', transcript_english.replace("\n", " ")) if s.strip()]
         if not sents:
             return {"annotations": []}
+
         sent_emb = embed(sents)
-        dept_emb = embed(DEPARTMENTS)
+
+        # Use enhanced department descriptions for better semantic matching
+        dept_texts = [f"{name}: {DEPARTMENT_DESCRIPTIONS[name]}" for name in DEPARTMENTS]
+        dept_emb = embed(dept_texts)
 
         sims = torch.nn.functional.cosine_similarity(
             sent_emb.unsqueeze(1), dept_emb.unsqueeze(0), dim=-1
@@ -455,10 +527,13 @@ class DeptCueTagger(Tool):
 
         annotations = []
         for i, s in enumerate(sents):
+            # Only include annotations with meaningful confidence
+            confidence = float(scores[i])
             annotations.append({
                 "sentence": s,
                 "dept": DEPARTMENTS[best[i]],
-                "score": float(scores[i]),
+                "score": confidence,
+                "confidence": "high" if confidence > 0.7 else "medium" if confidence > 0.5 else "low"
             })
         return {"annotations": annotations}
 
@@ -467,8 +542,8 @@ class IssueSummarizer(Tool):
     name = "issue_summarizer"
     description = "Extracts issues, highlights, decisions, and action items with owners and deadlines."
 
-    def __init__(self, model_env_var: str = "LLM_MODEL"):
-        self.model_name = os.getenv(model_env_var, "gpt-4o-mini")
+    def __init__(self, model_env_var: str = "LLM_MODEL_SUMMARIZE"):
+        self.model_name = os.getenv(model_env_var, os.getenv("LLM_MODEL", "gpt-4o"))
 
     def run(
         self,
@@ -479,49 +554,85 @@ class IssueSummarizer(Tool):
     ) -> MeetingSummary:
         cue_hint = ""
         if dept_cues and dept_cues.get("annotations"):
-            # Provide a compact hint to steer owner assignment
-            top_examples = dept_cues["annotations"][:30]
-            cue_pairs = [f"[{a['dept']}] {a['sentence']}" for a in top_examples]
-            cue_hint = "\n\nOwner hints (dept cues):\n" + "\n".join(cue_pairs)
+            # Provide a compact hint to steer owner assignment, prioritizing high-confidence matches
+            high_conf = [a for a in dept_cues["annotations"] if a.get("confidence") == "high"][:20]
+            med_conf = [a for a in dept_cues["annotations"] if a.get("confidence") == "medium"][:10]
+            top_examples = high_conf + med_conf
+            if top_examples:
+                cue_pairs = [f"[{a['dept']}] {a['sentence']}" for a in top_examples]
+                cue_hint = "\n\nDEPARTMENT HINTS (use these to assign owners):\n" + "\n".join(cue_pairs)
 
-        sys_instructions = f"""
-You are an operations analyst. From the transcript, identify distinct issues
-raised and discussants’ points. For each issue, provide:
-- issue_name: short, generalized title
-- highlights: 3–8 bullets of core discussion points
-- decisions: 1–5 concrete decisions
-- action_items: list of action items with owner (person or department) and deadline
+        dept_list = ', '.join(DEPARTMENTS)
+        sys_instructions = f"""You are a senior operations analyst with deep expertise in manufacturing and operations management.
+Analyze the transcript thoroughly and extract structured meeting insights with HIGH ACCURACY.
 
-Guidelines:
-- Owners: If a specific person is unclear, assign the most relevant department
-  from this set: {', '.join(DEPARTMENTS)}.
-- Deadlines: If none are stated, infer a reasonable milestone (e.g., "next sprint",
-  "by EOW", "before site handover") and note it as an inferred deadline.
-- Keep content concise and businesslike.
-- Do NOT include speaker names.
-- Output strictly valid JSON for the schema below.
+EXTRACTION RULES:
 
-JSON schema:
+1. **ISSUES**: Identify EVERY distinct topic or problem discussed.
+   - Do NOT merge related but separate topics into one issue
+   - Each issue should have a clear, specific title (not generic like "General Discussion")
+   - If multiple sub-topics are discussed under one umbrella, split them into separate issues
+
+2. **HIGHLIGHTS**: Capture 3-8 specific, factual points per issue:
+   - Include specific numbers, quantities, percentages, and measurements mentioned
+   - Include specific dates and timelines discussed
+   - Capture root causes and problems identified
+   - Note concerns raised by participants
+   - Include any technical specifications or requirements mentioned
+
+3. **DECISIONS**: Only include CONCRETE decisions (not discussions or suggestions):
+   - Must be actionable and specific
+   - Include any conditions, caveats, or dependencies mentioned
+   - A decision must have been agreed upon, not just proposed
+
+4. **ACTION ITEMS**: Extract with precision:
+   - Description: What EXACTLY needs to be done (be specific, not vague)
+   - Owner: Specific person name if mentioned in transcript, otherwise assign to most relevant department from: {dept_list}
+   - Deadline: Exact date if stated, otherwise infer from context:
+     * "immediately" / "urgent" → "Immediate"
+     * "this week" → "By end of week"
+     * "next meeting" → "Before next meeting"
+     * If truly unclear, use "TBD - needs clarification"
+
+QUALITY REQUIREMENTS:
+- Every action item MUST have an owner - never leave blank
+- Cross-reference the DEPARTMENT HINTS to validate owner assignments
+- Do NOT hallucinate or invent details not present in the transcript
+- Preserve all numerical data exactly as stated
+- If something is ambiguous, note it as such rather than guessing
+
+ATTENDEES for this meeting: {attendees}
+
+Output strictly valid JSON matching this schema:
 {{
   "meeting_date": "{meeting_date}",
-  "attendees": {attendees},
-  "purpose": "<one-sentence purpose>",
+  "attendees": {json.dumps(attendees)},
+  "purpose": "<one clear sentence describing the meeting's main purpose>",
   "issues": [
     {{
-      "issue_name": "<string>",
-      "highlights": ["<string>", ...],
-      "decisions": ["<string>", ...],
+      "issue_name": "<specific, descriptive title>",
+      "highlights": ["<specific factual point>", ...],
+      "decisions": ["<concrete decision made>", ...],
       "action_items": [
-        {{"description": "<string>", "owner": "<string>", "deadline": "<string|null>"}},
+        {{"description": "<specific task>", "owner": "<person or department>", "deadline": "<date or milestone>"}},
         ...
       ]
     }}, ...
   ]
 }}
 """
-        user_prompt = f"TRANSCRIPT:\n\n{polished_transcript}{cue_hint}\n\nReturn ONLY the JSON object."
+        user_prompt = f"TRANSCRIPT:\n\n{polished_transcript}{cue_hint}\n\nAnalyze carefully and return ONLY the JSON object."
         raw_json = llm_complete(system=sys_instructions, user=user_prompt, model=self.model_name)
-        data = json.loads(raw_json)
+
+        # Clean up potential markdown code blocks from LLM response
+        cleaned_json = raw_json.strip()
+        if cleaned_json.startswith("```"):
+            cleaned_json = cleaned_json.split("\n", 1)[1] if "\n" in cleaned_json else cleaned_json[3:]
+        if cleaned_json.endswith("```"):
+            cleaned_json = cleaned_json.rsplit("```", 1)[0]
+        cleaned_json = cleaned_json.strip()
+
+        data = json.loads(cleaned_json)
         return MeetingSummary(**data)
 
 
@@ -558,6 +669,72 @@ class MarkdownFormatter(Tool):
                     lines.append(f"- **{ai.description}** — **Owner:** {owner}{deadline}")
                 lines.append("\n")
         return "\n".join(lines).strip() + "\n"
+
+
+class SummaryValidator(Tool):
+    name = "summary_validator"
+    description = "Cross-checks extracted summary against transcript for accuracy and completeness."
+
+    def __init__(self, model_env_var: str = "LLM_MODEL_VALIDATE"):
+        self.model_name = os.getenv(model_env_var, os.getenv("LLM_MODEL", "gpt-4o"))
+
+    def run(self, summary: MeetingSummary, polished_transcript: str) -> MeetingSummary:
+        """Validates and corrects the summary against the original transcript."""
+
+        # Convert summary to dict for validation
+        summary_dict = summary.model_dump()
+
+        validation_prompt = f"""You are a quality assurance analyst. Your task is to validate a meeting summary against the original transcript.
+
+ORIGINAL TRANSCRIPT:
+\"\"\"
+{polished_transcript}
+\"\"\"
+
+EXTRACTED SUMMARY:
+\"\"\"
+{json.dumps(summary_dict, indent=2)}
+\"\"\"
+
+VALIDATION TASKS:
+1. **Verify Action Items**: Check that each action item actually exists in the transcript
+   - Remove any action items that were hallucinated or not mentioned
+   - Add any action items that were missed
+
+2. **Verify Decisions**: Ensure decisions were actually made (not just discussed)
+   - Remove decisions that were only proposed but not agreed upon
+   - Add any concrete decisions that were missed
+
+3. **Verify Numbers & Dates**: Check all numerical data matches the transcript exactly
+   - Fix any incorrect numbers, dates, percentages, or quantities
+
+4. **Verify Owners**: Ensure owner assignments are accurate
+   - If a specific person was mentioned, use their name
+   - If unclear, use the appropriate department
+
+5. **Check Completeness**: Identify any major topics that were missed entirely
+
+Return the CORRECTED summary as valid JSON with the same schema.
+Only make changes if there are actual errors. If the summary is accurate, return it unchanged.
+
+Return ONLY the JSON object, no explanation."""
+
+        raw_json = llm_complete(prompt=validation_prompt, model=self.model_name)
+
+        # Clean up potential markdown code blocks
+        cleaned_json = raw_json.strip()
+        if cleaned_json.startswith("```"):
+            cleaned_json = cleaned_json.split("\n", 1)[1] if "\n" in cleaned_json else cleaned_json[3:]
+        if cleaned_json.endswith("```"):
+            cleaned_json = cleaned_json.rsplit("```", 1)[0]
+        cleaned_json = cleaned_json.strip()
+
+        try:
+            validated_data = json.loads(cleaned_json)
+            return MeetingSummary(**validated_data)
+        except (json.JSONDecodeError, Exception):
+            # If validation fails, return original summary
+            return summary
 
 
 # -------------------------
@@ -623,6 +800,17 @@ def main():
         help="Speech-to-text backend",
     )
     parser.add_argument("--tmp_wav", default=None, help="Optional path for extracted WAV (debugging)")
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        default=os.getenv("VALIDATE_SUMMARY", "true").lower() == "true",
+        help="Enable summary validation step for improved accuracy (default: enabled)",
+    )
+    parser.add_argument(
+        "--no-validate",
+        action="store_true",
+        help="Disable summary validation step to save time/cost",
+    )
 
     args = parser.parse_args()
 
@@ -638,17 +826,22 @@ def main():
 
     attendees = [a.strip() for a in args.attendees.split(";") if a.strip()]
 
+    # Determine if validation is enabled
+    validate_enabled = args.validate and not args.no_validate
+
     tools: Dict[str, Tool] = {
         "audio_extractor": AudioExtractor(),
         "transcriber": Transcriber(backend=args.stt),
         "register_transformer": RegisterTransformer(),
         "dept_cue_tagger": DeptCueTagger(),
         "issue_summarizer": IssueSummarizer(),
+        "summary_validator": SummaryValidator(),
         "markdown_formatter": MarkdownFormatter(),
     }
 
     agent = Agent(tools)
 
+    # Build execution plan
     plan = [
         {"tool": "audio_extractor", "inputs": {"input_video": args.input, "out_wav": args.tmp_wav}, "save_as": "wav"},
         {"tool": "transcriber", "inputs": {"wav_path": "$ctx.wav"}, "save_as": "raw_en"},
@@ -664,8 +857,21 @@ def main():
             },
             "save_as": "summary",
         },
-        {"tool": "markdown_formatter", "inputs": {"summary": "$ctx.summary"}, "save_as": "markdown"},
     ]
+
+    # Add validation step if enabled (improves accuracy by cross-checking)
+    if validate_enabled:
+        plan.append({
+            "tool": "summary_validator",
+            "inputs": {
+                "summary": "$ctx.summary",
+                "polished_transcript": "$ctx.polished",
+            },
+            "save_as": "validated_summary",
+        })
+        plan.append({"tool": "markdown_formatter", "inputs": {"summary": "$ctx.validated_summary"}, "save_as": "markdown"})
+    else:
+        plan.append({"tool": "markdown_formatter", "inputs": {"summary": "$ctx.summary"}, "save_as": "markdown"})
 
     ctx = agent.run(plan)
 
