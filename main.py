@@ -744,11 +744,13 @@ def llm_complete(
     prompt: Optional[str] = None,
     model: Optional[str] = None,
     system: Optional[str] = None,
-    user: Optional[str] = None
+    user: Optional[str] = None,
+    temperature: Optional[float] = 0.2
 ) -> str:
     """OpenAI-compatible Chat Completions helper.
     - Set OPENAI_API_KEY, optionally OPENAI_BASE_URL
     - Provide either a single combined `prompt` (as user) or system+user messages.
+    - Temperature defaults to 0.2; set to None for models that don't support it.
     """
     from openai import OpenAI
 
@@ -768,11 +770,24 @@ def llm_complete(
         if user:
             messages.append({"role": "user", "content": user})
 
-    resp = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=0.2,
-    )
+    # Build request kwargs - some models don't support temperature
+    request_kwargs = {
+        "model": model,
+        "messages": messages,
+    }
+    if temperature is not None:
+        request_kwargs["temperature"] = temperature
+
+    try:
+        resp = client.chat.completions.create(**request_kwargs)
+    except Exception as e:
+        # If temperature is not supported, retry without it
+        if "temperature" in str(e).lower() and temperature is not None:
+            request_kwargs.pop("temperature", None)
+            resp = client.chat.completions.create(**request_kwargs)
+        else:
+            raise
+
     return resp.choices[0].message.content.strip()
 
 
